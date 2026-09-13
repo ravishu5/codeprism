@@ -1,0 +1,23 @@
+[project]
+name = "codeprism"
+version = "0.1.0"
+description = "A local-first, symbol-level code intelligence system and MCP server"
+readme = "README.md"
+authors = [
+    { name = "ravishu5", email = "itsshankar.ravi@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp>=2.2.0",
+    "pydantic>=2.13.5",
+    "pytest>=9.1.1",
+    "tree-sitter-language-pack>=1.19.0",
+]
+
+[project.scripts]
+codeprism = "codeprism:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
