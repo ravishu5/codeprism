@@ -2,18 +2,19 @@
 
 Track progress across all milestones as we implement **CodePrism**.
 
-- [ ] **Phase 1: Foundation & Data Models**
+- [x] **Phase 1: Foundation & Data Models**
   - [x] Add dependencies (`tree-sitter-language-pack`, `pydantic`, `mcp`, `httpx`, `pytest`)
-  - [ ] Create `src/codeprism/models.py`
-    - [ ] `make_symbol_id(file_path, qualified_name, kind, overload=0)`
-    - [ ] `ByteSlicedSource` with UTF-8 byte-offset handling
-    - [ ] `Symbol` model definition (with SHA-256 `content_hash`)
-  - [ ] Create and pass `tests/test_models.py`
+  - [x] Create `src/codeprism/models.py`
+    - [x] `make_symbol_id(file_path, qualified_name, kind, overload=0)`
+    - [x] `ByteSlicedSource` with UTF-8 byte-offset handling
+    - [x] `Symbol` model definition (with SHA-256 `content_hash`)
+  - [x] Create and pass `tests/test_models.py` (8 passed in 0.05s)
 
 - [ ] **Phase 2: Tree-Sitter AST Parsing & Symbol Extractor**
   - [ ] Language specification registry (`LanguageSpec`)
   - [ ] Multi-language AST walker
   - [ ] Docstring and signature extraction
+  - [ ] Overload disambiguation pass (`~1`, `~2`)
   - [ ] Unit tests for multi-language extraction (Python, JS/TS, Go)
 
 - [ ] **Phase 3: SQLite WAL Storage & Indexing Engine**

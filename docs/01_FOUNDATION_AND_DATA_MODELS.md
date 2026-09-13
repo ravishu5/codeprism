@@ -1,8 +1,8 @@
 # Phase 1: Foundation & Data Models Guide
 
 > **Project:** `CodePrism`
-> **Goal:** Build the core primitives for symbol identity, source representation, and coordinate handling.
-> **Files to create:** `src/codeprism/models.py` and `tests/test_models.py`
+> **Status:** ✅ Completed & Verified
+> **Core Files:** [`src/codeprism/models.py`](file:///Users/ravi/Desktop/learn_with_gemini/codeprism/src/codeprism/models.py) and [`tests/test_models.py`](file:///Users/ravi/Desktop/learn_with_gemini/codeprism/tests/test_models.py)
 
 ---
 
@@ -28,7 +28,7 @@ A symbol must have an identity derived from its **hierarchical name and kind**, 
 $$\text{Symbol ID} = \texttt{\{file\_path\}::\{qualified\_name\}\#\{kind\}}$$
 
 #### Format Rules:
-* `file_path`: Relative path from the repository root (e.g. `src/auth.py`).
+* `file_path`: Relative path from the repository root (e.g. `src/auth.py`), normalized to forward slashes.
 * `qualified_name`: The hierarchical path to the symbol:
   * Top-level function: `login`
   * Class: `User`
@@ -69,67 +69,102 @@ def hello():
    Python slices using *character indices*. The slice starts 5 characters too late, returning mangled code! Because identifiers usually retain their length, the corrupt slice often looks like plausible code rather than an obvious crash, causing silent hallucinations.
 
 ### The Solution: `ByteSlicedSource`
-We create a custom class wrapping the raw file `bytes`:
+We created a custom wrapper around raw file `bytes`:
 ```python
 class ByteSlicedSource:
-    def __init__(self, data: bytes):
-        self._data = data
+    def __init__(self, data: bytes | str) -> None:
+        self._data = data if isinstance(data, bytes) else data.encode("utf-8")
 
     def __getitem__(self, key: slice | int) -> str:
         # Slices directly in byte-space, then decodes to UTF-8
         chunk = self._data[key] if isinstance(key, slice) else self._data[key:key + 1]
-        return chunk.decode("utf-8", errors="replace")
+        try:
+            return chunk.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # Handle boundary clips gracefully
+            if exc.end == len(chunk) and exc.start >= len(chunk) - 3:
+                try:
+                    return chunk[: exc.start].decode("utf-8")
+                except UnicodeDecodeError:
+                    pass
+            return chunk.decode("utf-8", errors="replace")
 ```
 Now, `source[node.start_byte : node.end_byte]` operates in the **exact coordinate system** of Tree-sitter.
 
 ---
 
-## 4. Specification: Data Structures to Implement
+## 4. Completed Implementation Reference
 
-### `src/codeprism/models.py`
+The implemented module [`src/codeprism/models.py`](file:///Users/ravi/Desktop/learn_with_gemini/codeprism/src/codeprism/models.py) exposes:
 
-You will implement the following:
-
-#### 1. Helper: `make_symbol_id`
+### `make_symbol_id`
 ```python
-def make_symbol_id(file_path: str, qualified_name: str, kind: str, overload: int = 0) -> str:
-    """Generate a canonical symbol ID string.
-    
-    Examples:
-        make_symbol_id("src/auth.py", "login", "function") 
-        -> "src/auth.py::login#function"
-        
-        make_symbol_id("src/auth.py", "login", "function", overload=1) 
-        -> "src/auth.py::login~1#function"
-    """
+def make_symbol_id(
+    file_path: str,
+    qualified_name: str,
+    kind: str,
+    overload: int = 0,
+) -> str:
+    clean_path = file_path.replace("\\", "/").lstrip("/")
+    overload_suffix = f"~{overload}" if overload > 0 else ""
+    return f"{clean_path}::{qualified_name}{overload_suffix}#{kind.lower()}"
 ```
 
-#### 2. Class: `ByteSlicedSource`
-* Holds raw `bytes`.
-* `__len__`: Returns length in bytes.
-* `__getitem__(self, key: slice | int) -> str`: Returns decoded string slice.
-* Handles safe UTF-8 decoding (fallback gracefully if a slice clips a multi-byte boundary).
+### `compute_content_hash`
+Computes a SHA-256 hex digest of the raw byte slice:
+```python
+def compute_content_hash(content: Union[bytes, str]) -> str:
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+```
 
-#### 3. Class: `Symbol` (Dataclass or Pydantic)
-* `id: str` (Canonical ID)
-* `name: str` (Bare identifier, e.g. `"login"`)
-* `kind: str` (`"function"`, `"class"`, `"method"`, `"constant"`, `"type"`)
-* `file_path: str` (Repo-relative path)
-* `start_line: int` (1-indexed start line)
-* `end_line: int` (1-indexed end line)
-* `start_byte: int` (Byte offset into file)
-* `end_byte: int` (Byte offset into file)
-* `signature: str` (Signature or declaration head, e.g. `def login(username: str) -> bool`)
-* `docstring: Optional[str] = None`
-* `parent: Optional[str] = None` (Parent class or namespace if nested)
-* `content_hash: str` (SHA-256 hex digest of the symbol's exact raw byte slice)
+### `Symbol` Model
+A frozen Pydantic model representing a fully resolved code symbol:
+```python
+class Symbol(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    kind: str
+    file_path: str
+    start_line: int
+    end_line: int
+    start_byte: int
+    end_byte: int
+    signature: str
+    docstring: Optional[str] = None
+    parent: Optional[str] = None
+    content_hash: str
+```
+It includes a factory constructor `Symbol.create(...)` which automatically slices raw source bytes, calculates the SHA-256 hash, and generates the canonical ID in one call.
 
 ---
 
-## 5. Verification: What Tests Must Pass
+## 5. Verification Suite & Test Results
 
-Create `tests/test_models.py` with tests verifying:
-1. `test_symbol_id_generation`: Correct formatting for regular and overloaded symbols.
-2. `test_byte_sliced_source_ascii`: Standard ASCII string slicing.
-3. `test_byte_sliced_source_utf8_offset`: Verify that a file containing multi-byte UTF-8 (emojis/non-ASCII) does **not** experience coordinate drift when sliced with byte offsets.
-4. `test_symbol_content_hash`: Verify that SHA-256 content hashing accurately flags changes in code content.
+The test suite in [`tests/test_models.py`](file:///Users/ravi/Desktop/learn_with_gemini/codeprism/tests/test_models.py) covers:
+
+1. **`test_basic_symbol_id` & `test_method_symbol_id`**: Verifies deterministic `{path}::{name}#{kind}` formatting.
+2. **`test_overload_symbol_id`**: Verifies `~1`, `~2` overload suffixes for TypeScript / Python function overloading.
+3. **`test_normalizes_slashes`**: Verifies Windows backslashes `\` and leading slashes are normalized.
+4. **`test_ascii_slicing`**: Verifies direct byte-level string extraction.
+5. **`test_utf8_multi_byte_drift_prevention`**: 
+   - Uses a file header with emojis (`🔥`) and accented characters (`é`).
+   - Slices using exact Tree-sitter byte offsets.
+   - Proves `ByteSlicedSource` extracts `"def get_energy():"` cleanly, whereas naive Python `str[start:end]` drifts and extracts corrupt text.
+6. **`test_safe_boundary_clipping`**: Verifies slicing midway through a multi-byte boundary falls back cleanly without crashing.
+7. **`test_symbol_create_and_hashing`**: Verifies that editing code changes `content_hash` while preserving stable `id`.
+
+### Test Run Output:
+```text
+============================== test session starts ==============================
+rootdir: /Users/ravi/Desktop/learn_with_gemini/codeprism
+configfile: pyproject.toml
+testpaths: tests
+collected 8 items
+
+tests/test_models.py ........                                            [100%]
+============================== 8 passed in 0.05s ===============================
+```
